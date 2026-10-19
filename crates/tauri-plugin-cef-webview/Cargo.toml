@@ -1,6 +1,6 @@
 [package]
 name = "tauri-plugin-cef-webview"
-version = "0.2.0"
+version = "0.2.1"
 description = "Embed CEF child webviews in a Tauri frontend with a <webview> element"
 authors = [ "hairyf" ]
 edition = "2021"

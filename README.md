@@ -18,7 +18,7 @@ cargo add tauri-plugin-cef-webview
 ```toml
 # src-tauri/Cargo.toml
 [dependencies]
-tauri-plugin-cef-webview = "0.2.0"
+tauri-plugin-cef-webview = "0.2.1"
 ```
 
 ## Setup
