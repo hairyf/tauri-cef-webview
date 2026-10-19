@@ -1,7 +1,7 @@
 {
   "name": "tauri-cef-webview",
   "type": "module",
-  "version": "0.2.1",
+  "version": "0.2.2",
   "packageManager": "pnpm@12.8.1",
   "description": "Embed native CEF child webviews in Tauri with a <webview> element",
   "author": "hairyf",

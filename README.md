@@ -8,6 +8,9 @@ Embed native CEF child webviews in a Tauri v3 application and control them with 
 
 The element is only a layout box: the actual page is rendered by a native child webview positioned on top of it. Size and position are kept in sync with `getBoundingClientRect()`.
 
+> [!WARNING]
+> Requires **Tauri v3 alpha** (`tauri 3.0.0-alpha.5`, `tauri-runtime-cef 3.0.0-alpha.6`, `tauri-plugin 3.0.0-alpha.4`). The plugin is built against alpha APIs, which change without notice. Pin your Tauri versions together with this package and expect breakage between alpha releases. Building also needs CMake and Ninja.
+
 ## Install
 
 ```bash
@@ -18,7 +21,7 @@ cargo add tauri-plugin-cef-webview
 ```toml
 # src-tauri/Cargo.toml
 [dependencies]
-tauri-plugin-cef-webview = "0.2.1"
+tauri-plugin-cef-webview = "0.2.2"
 ```
 
 ## Setup
