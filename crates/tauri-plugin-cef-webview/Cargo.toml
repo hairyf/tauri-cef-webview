@@ -6,6 +6,8 @@ authors = [ "hairyf" ]
 edition = "2021"
 rust-version = "1.85"
 license = "MIT"
+repository = "https://github.com/hairyf/tauri-cef-webview"
+homepage = "https://github.com/hairyf/tauri-cef-webview#readme"
 links = "tauri-plugin-cef-webview"
 build = "build.rs"
 

@@ -9,6 +9,7 @@ dist
 lib-cov
 logs
 node_modules
+target
 temp
 skills
 .eslintcache
