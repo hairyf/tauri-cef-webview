@@ -12,12 +12,13 @@ The element is only a layout box: the actual page is rendered by a native child 
 
 ```bash
 pnpm add tauri-cef-webview @tauri-apps/api
+cargo add tauri-plugin-cef-webview
 ```
 
 ```toml
 # src-tauri/Cargo.toml
 [dependencies]
-tauri-plugin-cef-webview = { path = "../tauri-cef-webview/crates/tauri-plugin-cef-webview" }
+tauri-plugin-cef-webview = "0.2.0"
 ```
 
 ## Setup
