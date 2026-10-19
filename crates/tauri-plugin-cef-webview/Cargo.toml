@@ -1,0 +1,23 @@
+[package]
+name = "tauri-plugin-cef-webview"
+version = "0.1.0"
+description = "Embed CEF child webviews in a Tauri frontend with a <webview> element"
+authors = [ "hairyf" ]
+edition = "2021"
+rust-version = "1.85"
+license = "MIT"
+links = "tauri-plugin-cef-webview"
+build = "build.rs"
+
+[features]
+default = []
+devtools = [ "tauri/devtools" ]
+
+[dependencies]
+serde = { version = "1", features = [ "derive" ] }
+serde_json = "1"
+tauri = { version = "3.0.0-alpha.5", features = [ "unstable" ] }
+url = "2"
+
+[build-dependencies]
+tauri-plugin = { version = "3.0.0-alpha.4", features = [ "build" ] }

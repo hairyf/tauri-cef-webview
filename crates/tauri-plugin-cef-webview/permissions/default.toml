@@ -1,0 +1,14 @@
+[default]
+description = "Default permissions for the cef-webview plugin. Allows the frontend to create and control embedded CEF webviews."
+permissions = [
+  "allow-create",
+  "allow-set-rect",
+  "allow-set-visible",
+  "allow-destroy",
+  "allow-eval",
+  "allow-insert-css",
+  "allow-remove-inserted-css",
+  "allow-navigate",
+  "allow-reload",
+  "allow-open-devtools",
+]
