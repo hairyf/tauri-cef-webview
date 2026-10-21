@@ -178,6 +178,11 @@ pub fn create<R: Runtime>(
     options: Option<CreateOptions>,
 ) -> Result<Value, String> {
     let window = caller.window();
+    // The host runtime is injected into child webviews too, so a page loaded
+    // inside one could otherwise ask for another level of nesting.
+    if registry.is_child(caller.label()) {
+        return Err("cef-webview: cannot create a webview from a child webview".into());
+    }
     let CreateOptions {
         user_agent,
         preload,

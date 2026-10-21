@@ -8,7 +8,7 @@ Embed native CEF child webviews in a Tauri v3 application and control them with 
 
 The element keeps the place in the layout; the actual page is rendered by a native child webview drawn above it. Size and position are kept in sync with `getBoundingClientRect()`.
 
-The element exposes the same attributes, methods and DOM events as Electron's [`<webview>` tag](https://github.com/electron/electron/blob/main/docs/api/webview-tag.md). No frontend import is required: the plugin injects the element API into every application page.
+The element exposes the same attributes, methods and DOM events as Electron's [`<webview>` tag](https://github.com/electron/electron/blob/main/docs/api/webview-tag.md). No frontend import is required: the plugin registers the element API as a Tauri initialization script, so it exists before any page script runs, in every window, including windows created from `tauri.conf.json`.
 
 > [!WARNING]
 > Requires **Tauri v3 alpha** (`tauri 3.0.0-alpha.5`, `tauri-runtime-cef 3.0.0-alpha.6`, `tauri-plugin 3.0.0-alpha.4`). The plugin is built against alpha APIs, which change without notice. Pin your Tauri versions together with this package and expect breakage between alpha releases. Building also needs CMake and Ninja.
@@ -166,7 +166,7 @@ fn highlight(app: tauri::AppHandle) -> tauri::Result<()> {
 
 ## How it works
 
-* The plugin injects `element.js` into every application page. It enhances `<webview>` elements, including elements added later, and talks to the plugin over Tauri IPC.
+* The plugin registers `element.js` as a Tauri initialization script, so it runs at document start, before any page script. It enhances `<webview>` elements, including elements added later or created with `createElement`, and talks to the plugin over Tauri IPC.
 * On mount the element calls the `create` command, passing its `getBoundingClientRect()`.
 * A shared `requestAnimationFrame` loop pushes position changes (scroll, resize, layout) to the native layer.
 * `ResizeObserver` triggers the same loop; `IntersectionObserver` hides the native webview when the element leaves the viewport or collapses to zero size.

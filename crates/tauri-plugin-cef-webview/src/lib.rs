@@ -9,21 +9,13 @@ pub use registry::{CefWebview, Registry};
 
 use tauri::{
     plugin::{Builder as PluginBuilder, TauriPlugin},
-    Manager, Runtime, Webview,
+    Manager, Runtime,
 };
 
 /// Installed into every application page so `<webview>` works without imports.
+/// Registered as a plugin initialization script, so it runs before any page
+/// script in every webview, including windows created from the app config.
 const HOST_RUNTIME: &str = include_str!("element.js.inc");
-
-fn inject_host_runtime<R: Runtime>(webview: &Webview<R>) {
-    let is_child = webview
-        .try_state::<Registry<R>>()
-        .is_some_and(|registry| registry.is_child(webview.label()));
-    if is_child {
-        return;
-    }
-    let _ = webview.eval(HOST_RUNTIME);
-}
 
 /// Plugin configuration.
 #[derive(Clone, Debug, Default)]
@@ -56,6 +48,7 @@ pub fn init<R: Runtime>() -> TauriPlugin<R> {
 /// Initializes the plugin with a custom configuration.
 pub fn init_with<R: Runtime>(config: Config) -> TauriPlugin<R> {
     PluginBuilder::new("cef-webview")
+        .initialization_script(HOST_RUNTIME)
         .invoke_handler(tauri::generate_handler![
             commands::create,
             commands::set_rect,
@@ -69,8 +62,6 @@ pub fn init_with<R: Runtime>(config: Config) -> TauriPlugin<R> {
             commands::open_devtools,
             commands::call,
         ])
-        .on_webview_ready(|webview| inject_host_runtime(&webview))
-        .on_page_load(|webview, _payload| inject_host_runtime(webview))
         .setup(move |app, _api| {
             app.manage(Registry::<R>::new(config));
             Ok(())

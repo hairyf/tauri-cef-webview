@@ -13,6 +13,16 @@
 
   window.__cefWebviewInstalled = true
 
+  // `createElement` runs synchronously while the observer runs on a microtask,
+  // so programmatic elements must be enhanced here to be usable right away.
+  const createElement = document.createElement.bind(document)
+  document.createElement = function (name, options) {
+    const element = createElement(name, options)
+    if (typeof name === 'string' && name.toLowerCase() === 'webview')
+      enhance(element)
+    return element
+  }
+
   const PLUGIN = 'cef-webview'
   const EVENT = 'cef-webview://event'
   const BOOLEAN_ATTRIBUTES = [
