@@ -15,6 +15,7 @@ Default permissions for the cef-webview plugin. Allows the frontend to create an
 - `allow-reload`
 - `allow-open-devtools`
 - `allow-call`
+- `allow-frame`
 
 ## Permission Table
 
@@ -125,6 +126,32 @@ Enables the eval command without any pre-configured scope.
 <td>
 
 Denies the eval command without any pre-configured scope.
+
+</td>
+</tr>
+
+<tr>
+<td>
+
+`cef-webview:allow-frame`
+
+</td>
+<td>
+
+Enables the frame command without any pre-configured scope.
+
+</td>
+</tr>
+
+<tr>
+<td>
+
+`cef-webview:deny-frame`
+
+</td>
+<td>
+
+Denies the frame command without any pre-configured scope.
 
 </td>
 </tr>

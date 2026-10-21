@@ -8,7 +8,7 @@ use std::{
 
 use tauri::{webview::Webview, LogicalPosition, LogicalSize, Rect, Runtime, Url};
 
-use crate::{scripts, Config};
+use crate::{frames::FrameSlot, scripts, Config};
 
 /// Mutable observation of a child webview, updated from Tauri and guest events.
 #[derive(Clone, Debug)]
@@ -29,6 +29,8 @@ pub struct WebviewState {
     pub web_contents_id: i32,
     pub devtools_focused: bool,
     pub last_finished_url: String,
+    /// Whether this webview is rendered into the host page by CEF.
+    pub offscreen: bool,
 }
 
 impl Default for WebviewState {
@@ -50,6 +52,7 @@ impl Default for WebviewState {
             web_contents_id: 0,
             devtools_focused: false,
             last_finished_url: String::new(),
+            offscreen: false,
         }
     }
 }
@@ -76,6 +79,7 @@ impl SharedState {
 pub struct Registry<R: Runtime> {
     webviews: Mutex<HashMap<String, Webview<R>>>,
     states: Mutex<HashMap<String, SharedState>>,
+    frames: Mutex<HashMap<String, FrameSlot>>,
     pending: Mutex<HashSet<String>>,
     css_sequence: Arc<AtomicU64>,
     contents_sequence: Arc<AtomicI32>,
@@ -87,6 +91,7 @@ impl<R: Runtime> Registry<R> {
         Self {
             webviews: Mutex::new(HashMap::new()),
             states: Mutex::new(HashMap::new()),
+            frames: Mutex::new(HashMap::new()),
             pending: Mutex::new(HashSet::new()),
             css_sequence: Arc::new(AtomicU64::new(0)),
             contents_sequence: Arc::new(AtomicI32::new(0)),
@@ -116,6 +121,35 @@ impl<R: Runtime> Registry<R> {
 
     pub(crate) fn next_contents_id(&self) -> i32 {
         self.contents_sequence.fetch_add(1, Ordering::Relaxed) + 1
+    }
+
+    /// Frame buffer of an off-screen webview, created on first use.
+    pub(crate) fn frames(&self, label: &str) -> FrameSlot {
+        self.frames
+            .lock()
+            .unwrap_or_else(|error| error.into_inner())
+            .entry(label.to_string())
+            .or_default()
+            .clone()
+    }
+
+    pub(crate) fn remove_frames(&self, label: &str) {
+        self.frames
+            .lock()
+            .unwrap_or_else(|error| error.into_inner())
+            .remove(label);
+    }
+
+    /// Latest painted rectangles for `label`, empty when nothing changed.
+    /// `full` resends the whole cached frame after a page re-attached.
+    pub(crate) fn frame_packet(&self, label: &str, full: bool) -> Vec<u8> {
+        let frames = self
+            .frames
+            .lock()
+            .unwrap_or_else(|error| error.into_inner())
+            .get(label)
+            .cloned();
+        frames.map(|frames| frames.packet(full)).unwrap_or_default()
     }
 
     /// Marks a label as owned by the plugin while its native webview is created.

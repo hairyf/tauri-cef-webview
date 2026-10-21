@@ -12,4 +12,5 @@ permissions = [
   "allow-reload",
   "allow-open-devtools",
   "allow-call",
+  "allow-frame",
 ]

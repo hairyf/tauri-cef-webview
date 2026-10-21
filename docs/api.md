@@ -279,6 +279,45 @@ app.listen("cef-webview://event", |event| {
 
 Payload shape: `{ label, event, args }`, where `event` is the DOM event name and `args` its payload array.
 
+## Off-screen rendering
+
+By default the child webview is a native window drawn above the page. Enable the
+`offscreen` feature and the plugin renders the child into a canvas inside the
+`<webview>` element instead, so host CSS (`z-index`, `transform`, clipping)
+applies to it and page scrollbars can cover it.
+
+```toml
+# Cargo.toml
+tauri-plugin-cef-webview = { version = "0.4", features = [ "offscreen" ] }
+```
+
+```rust
+tauri::Builder::default()
+  .runtime(tauri_plugin_cef_webview::cef_runtime())
+  .plugin(tauri_plugin_cef_webview::init_with(
+    tauri_plugin_cef_webview::Config::default().offscreen(true),
+  ))
+```
+
+`cef_runtime()` is the CEF runtime with `windowless_rendering_enabled` set, which
+CEF requires for off-screen browsers. The setting is global, so it must be in
+place before the application starts; the plugin cannot enable it afterwards.
+
+The element keeps the same API. Behind it:
+
+* CEF paints BGRA frames on its UI thread; the plugin keeps the latest frame and
+  a list of dirty rectangles.
+* The host page polls `plugin:cef-webview|frame` at ~60 fps and `putImageData`s
+  only what changed into a canvas that fills the element.
+* Pointer, wheel, keyboard and IME events go back through `sendInputEvent` and
+  the CEF browser host. A transparent textarea overlays the canvas to receive
+  focus and native IME composition, and CEF's cursor changes are applied to it.
+
+Trade-offs: off-screen browsers do not use accelerated compositing, so heavy
+pages animate less smoothly than native child webviews, and browser popups
+(`<select>`, context menus) are not drawn into the frame yet. Leave the setting
+off for pages that need native-quality scrolling.
+
 ## How it works
 
 * The plugin registers `element.js` as a Tauri initialization script, so it runs at document start before any page script, including in windows created from `tauri.conf.json`.
@@ -290,7 +329,7 @@ Payload shape: `{ label, event, args }`, where `event` is the DOM event name and
 
 ## Limitations
 
-* The native webview is drawn above the page. CSS `transform`, `opacity`, `border-radius`, `overflow: hidden` clipping and `z-index` stacking do not affect it. An element that must be covered cannot be placed over the webview.
+* The native webview is drawn above the page. CSS `transform`, `opacity`, `border-radius`, `overflow: hidden` clipping and `z-index` stacking do not affect it. An element that must be covered cannot be placed over the webview. Enable the `offscreen` feature to render into the page instead.
 * Position is synced on a best-effort basis; scrolling may show a few frames of lag.
 * The `<webview>` tag name has no hyphen, so it cannot be registered with `customElements.define`. The plugin enhances the element in place: the DOM node stays `<webview>` and is not an instance of a custom element class.
 * Only the CEF runtime (`tauri-runtime-cef`) is supported.

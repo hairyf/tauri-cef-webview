@@ -2,6 +2,9 @@
 //! the frontend with a plain `<webview>` element.
 
 mod commands;
+mod frames;
+#[cfg(feature = "offscreen")]
+mod offscreen;
 mod registry;
 mod scripts;
 
@@ -24,6 +27,11 @@ pub struct Config {
     pub js: Vec<String>,
     /// CSS injected into every child webview.
     pub css: Vec<String>,
+    /// Create child webviews off-screen and paint them into the host page.
+    ///
+    /// Requires `runtime(cef_runtime())` from this crate and the `offscreen`
+    /// feature; falls back to native child webviews otherwise.
+    pub offscreen: bool,
 }
 
 impl Config {
@@ -36,6 +44,12 @@ impl Config {
     /// Adds a stylesheet applied to every child webview.
     pub fn css(mut self, css: impl Into<String>) -> Self {
         self.css.push(css.into());
+        self
+    }
+
+    /// Renders child webviews into the host page instead of native child views.
+    pub fn offscreen(mut self, offscreen: bool) -> Self {
+        self.offscreen = offscreen;
         self
     }
 }
@@ -61,6 +75,7 @@ pub fn init_with<R: Runtime>(config: Config) -> TauriPlugin<R> {
             commands::reload,
             commands::open_devtools,
             commands::call,
+            commands::frame,
         ])
         .setup(move |app, _api| {
             app.manage(Registry::<R>::new(config));
@@ -79,4 +94,25 @@ impl<R: Runtime, M: Manager<R>> CefWebviewExt<R> for M {
     fn cef_webviews(&self) -> tauri::State<'_, Registry<R>> {
         self.state::<Registry<R>>()
     }
+}
+
+/// Returns the CEF runtime with windowless rendering enabled, required by
+/// [`Config::offscreen`].
+///
+/// ```text
+/// # use tauri::Manager;
+/// tauri::Builder::default()
+///     .runtime(tauri_plugin_cef_webview::cef_runtime())
+///     .plugin(tauri_plugin_cef_webview::init_with(
+///         tauri_plugin_cef_webview::Config::default().offscreen(true),
+///     ))
+/// # .run(tauri::generate_context!())
+/// # .unwrap();
+/// ```
+#[cfg(feature = "offscreen")]
+pub fn cef_runtime() -> tauri_runtime_cef::Cef {
+    use tauri_runtime_cef::Cef;
+    Cef::default().with_settings(|settings| {
+        settings.windowless_rendering_enabled = 1;
+    })
 }

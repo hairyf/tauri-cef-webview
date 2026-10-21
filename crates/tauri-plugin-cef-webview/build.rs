@@ -10,6 +10,7 @@ const COMMANDS: &[&str] = &[
     "reload",
     "open_devtools",
     "call",
+    "frame",
 ];
 
 fn main() {

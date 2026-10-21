@@ -73,6 +73,7 @@ fn snapshot(state: &SharedState) -> Value {
         "zoomFactor": state.zoom_factor,
         "zoomLevel": state.zoom_level,
         "webContentsId": state.web_contents_id,
+        "offscreen": state.offscreen,
     })
 }
 
@@ -114,6 +115,47 @@ fn integer_arg(args: &Value, key: &str) -> Result<i64, String> {
 
 fn boolean_arg(args: &Value, key: &str, default: bool) -> bool {
     args.get(key).and_then(Value::as_bool).unwrap_or(default)
+}
+
+/// Attaches the off-screen renderer when the plugin asks for it.
+#[cfg(feature = "offscreen")]
+fn set_frame_rate<R: Runtime>(webview: &Webview<R>, offscreen: bool) {
+    if offscreen {
+        crate::offscreen::set_frame_rate(webview);
+    }
+}
+
+#[cfg(not(feature = "offscreen"))]
+fn set_frame_rate<R: Runtime>(_webview: &Webview<R>, _offscreen: bool) {}
+
+#[cfg(feature = "offscreen")]
+fn attach_offscreen<R: Runtime>(
+    registry: &Registry<R>,
+    label: &str,
+    builder: &mut WebviewBuilder<R>,
+) -> bool {
+    crate::offscreen::attach(builder, registry.frames(label))
+}
+
+/// Off-screen rendering is compiled out.
+#[cfg(not(feature = "offscreen"))]
+fn attach_offscreen<R: Runtime>(
+    _registry: &Registry<R>,
+    _label: &str,
+    _builder: &mut WebviewBuilder<R>,
+) -> bool {
+    false
+}
+
+#[cfg(feature = "offscreen")]
+fn forward_input<R: Runtime>(webview: &CefWebview<R>, event: Value) -> Result<Value, String> {
+    crate::offscreen::send_input(webview.inner(), event);
+    Ok(Value::Null)
+}
+
+#[cfg(not(feature = "offscreen"))]
+fn forward_input<R: Runtime>(_webview: &CefWebview<R>, _event: Value) -> Result<Value, String> {
+    Err("sendInputEvent requires the `offscreen` feature".to_string())
 }
 
 fn read_preload(preload: &str) -> Result<String, String> {
@@ -228,6 +270,12 @@ pub async fn create<R: Runtime>(
         .parse::<Url>()
         .map_err(|cause| format!("invalid url `{url}`: {cause}"))?;
 
+    if registry.config().offscreen && !cfg!(feature = "offscreen") {
+        return Err(
+            "cef-webview: the `offscreen` config requires the `offscreen` feature".to_string(),
+        );
+    }
+
     let mut builder = WebviewBuilder::new(label.clone(), WebviewUrl::External(parsed))
         .position(LogicalPosition::new(x, y))
         .size(LogicalSize::new(width, height))
@@ -255,6 +303,14 @@ pub async fn create<R: Runtime>(
         builder = builder
             .initialization_script(scripts::insert_style(&format!("cwv-element-{index}"), &css));
     }
+
+    let offscreen = if registry.config().offscreen {
+        let offscreen = attach_offscreen(&registry, &label, &mut builder);
+        state.update(|state| state.offscreen = offscreen);
+        offscreen
+    } else {
+        false
+    };
 
     let allow_popups = allow_popups.unwrap_or(false);
     builder = builder.on_new_window(move |_url, _features| {
@@ -418,6 +474,7 @@ pub async fn create<R: Runtime>(
             return Err(error(cause));
         }
     };
+    set_frame_rate(&webview, offscreen);
     registry.insert(&label, webview);
     registry.unmark_child(&label);
 
@@ -467,7 +524,21 @@ pub async fn destroy<R: Runtime>(
         webview.close().map_err(error)?;
     }
     registry.remove_state(&label);
+    registry.remove_frames(&label);
     Ok(())
+}
+
+/// Returns the rectangles painted since the previous poll, empty when idle.
+#[tauri::command]
+pub async fn frame<R: Runtime>(
+    _caller: Webview<R>,
+    registry: State<'_, Registry<R>>,
+    label: String,
+    full: Option<bool>,
+) -> Result<tauri::ipc::Response, String> {
+    Ok(tauri::ipc::Response::new(
+        registry.frame_packet(&label, full.unwrap_or(false)),
+    ))
 }
 
 /// Evaluates JavaScript in a child webview.
@@ -717,8 +788,12 @@ pub async fn call<R: Runtime>(
         }
         "sendInputEvent" => {
             let event = arg(&args, "event")?.clone();
-            guest(&webview, format!("window.__cefWebview.input({event})"))?;
-            Ok(Value::Null)
+            if state.snapshot().offscreen {
+                forward_input(&webview, event)
+            } else {
+                guest(&webview, format!("window.__cefWebview.input({event})"))?;
+                Ok(Value::Null)
+            }
         }
         "setZoomFactor" => {
             let factor = number_arg(&args, "factor")?;

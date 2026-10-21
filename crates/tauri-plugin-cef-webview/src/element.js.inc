@@ -25,6 +25,51 @@
 
   const PLUGIN = 'cef-webview'
   const EVENT = 'cef-webview://event'
+  // CEF cursor types (`cef_cursor_type_t`) to CSS cursors.
+  const CURSORS = {
+    1: 'crosshair',
+    2: 'pointer',
+    3: 'text',
+    4: 'wait',
+    5: 'help',
+    6: 'e-resize',
+    7: 'n-resize',
+    8: 'ne-resize',
+    9: 'nw-resize',
+    10: 's-resize',
+    11: 'se-resize',
+    12: 'sw-resize',
+    13: 'w-resize',
+    14: 'ns-resize',
+    15: 'ew-resize',
+    16: 'nesw-resize',
+    17: 'nwse-resize',
+    18: 'col-resize',
+    19: 'row-resize',
+    20: 'all-scroll',
+    21: 'e-resize',
+    22: 'n-resize',
+    23: 'ne-resize',
+    24: 'nw-resize',
+    25: 's-resize',
+    26: 'se-resize',
+    27: 'sw-resize',
+    28: 'w-resize',
+    29: 'move',
+    30: 'vertical-text',
+    31: 'cell',
+    32: 'context-menu',
+    33: 'alias',
+    34: 'progress',
+    35: 'no-drop',
+    36: 'copy',
+    37: 'none',
+    38: 'not-allowed',
+    39: 'zoom-in',
+    40: 'zoom-out',
+    41: 'grab',
+    42: 'grabbing',
+  }
   const BOOLEAN_ATTRIBUTES = [
     'nodeintegration',
     'nodeintegrationinsubframes',
@@ -100,6 +145,7 @@
       zoomFactor: 1,
       zoomLevel: 0,
       webContentsId: 0,
+      offscreen: false,
     }
   }
 
@@ -169,6 +215,15 @@
       this.executeSequence = 0
       this.findSequence = 0
       this.pending = new Map()
+      this.surface = null
+      this.context = null
+      this.input = null
+      this.animation = 0
+      this.painting = false
+      this.painted = false
+      this.paintedAt = 0
+      this.composing = false
+      this.point = { x: 0, y: 0 }
 
       const src = element.getAttribute('src')
       if (!src)
@@ -191,6 +246,7 @@
         options: this.createOptions(),
       }).then((state) => {
         this.applyState(state)
+        this.mountSurface()
       })
       this.queue.catch((error) => {
         console.error(`[cef-webview] failed to create webview "${label}"`, error)
@@ -343,6 +399,11 @@
       byLabel.delete(this.label)
       this.resizeObserver.disconnect()
       this.intersectionObserver.disconnect()
+      cancelAnimationFrame(this.animation)
+      if (this.surface)
+        this.surface.remove()
+      if (this.input)
+        this.input.remove()
       this.element.dispatchEvent(createEvent('destroyed', {}))
       for (const pending of this.pending.values())
         pending.reject(new Error('webview was destroyed'))
@@ -375,6 +436,231 @@
 
     applyState(state) {
       this.state = { ...this.state, ...state }
+    }
+
+    mountSurface() {
+      if (!this.state.offscreen || this.surface || this.destroyed)
+        return
+      if (getComputedStyle(this.element).position === 'static')
+        this.element.style.position = 'relative'
+
+      const canvas = document.createElement('canvas')
+      canvas.setAttribute('part', 'surface')
+      Object.assign(canvas.style, {
+        position: 'absolute',
+        inset: '0',
+        width: '100%',
+        height: '100%',
+        pointerEvents: 'none',
+      })
+
+      const input = document.createElement('textarea')
+      input.tabIndex = 0
+      input.spellcheck = false
+      input.setAttribute('aria-label', 'webview content')
+      input.setAttribute('autocomplete', 'off')
+      Object.assign(input.style, {
+        position: 'absolute',
+        inset: '0',
+        width: '100%',
+        height: '100%',
+        margin: '0',
+        padding: '0',
+        border: '0',
+        outline: 'none',
+        resize: 'none',
+        overflow: 'hidden',
+        opacity: '0',
+        background: 'transparent',
+        color: 'transparent',
+        caretColor: 'transparent',
+        cursor: 'default',
+        fontSize: '16px',
+        zIndex: '1',
+      })
+
+      this.element.appendChild(canvas)
+      this.element.appendChild(input)
+      this.surface = canvas
+      this.context = canvas.getContext('2d')
+      this.input = input
+      this.bindInput(input)
+      this.render()
+    }
+
+    bindInput(input) {
+      const canvas = this.surface
+      const send = event => this.call('sendInputEvent', { event }).catch(noop)
+      const modifiers = (event) => {
+        const list = []
+        if (event.shiftKey)
+          list.push('shift')
+        if (event.ctrlKey)
+          list.push('control')
+        if (event.altKey)
+          list.push('alt')
+        if (event.metaKey)
+          list.push('meta')
+        if (event.getModifierState && event.getModifierState('CapsLock'))
+          list.push('capsLock')
+        if (event.getModifierState && event.getModifierState('NumLock'))
+          list.push('numLock')
+        if (event.location === 1)
+          list.push('isLeft')
+        if (event.location === 2)
+          list.push('isRight')
+        if (event.location === 3)
+          list.push('isKeypad')
+        if (event.repeat)
+          list.push('isAutoRepeat')
+        if (event.buttons & 1)
+          list.push('leftButtonDown')
+        if (event.buttons & 4)
+          list.push('middleButtonDown')
+        if (event.buttons & 2)
+          list.push('rightButtonDown')
+        return list
+      }
+      const where = (event) => {
+        const box = canvas.getBoundingClientRect()
+        this.point = {
+          x: Math.round(event.clientX - box.left),
+          y: Math.round(event.clientY - box.top),
+        }
+        return this.point
+      }
+      const button = event => event.button === 2 ? 'right' : event.button === 1 ? 'middle' : 'left'
+      const mouse = (type, event, extra) => send({
+        type,
+        ...where(event),
+        modifiers: modifiers(event),
+        ...extra,
+      })
+
+      input.addEventListener('mousedown', (event) => {
+        event.preventDefault()
+        input.focus({ preventScroll: true })
+        send({ type: 'focus' })
+        mouse('mouseDown', event, { button: button(event), clickCount: event.detail || 1 })
+      })
+      input.addEventListener('mouseup', (event) => {
+        event.preventDefault()
+        mouse('mouseUp', event, { button: button(event), clickCount: event.detail || 1 })
+      })
+      input.addEventListener('mousemove', event => mouse('mouseMove', event))
+      input.addEventListener('mouseleave', () => send({
+        type: 'mouseLeave',
+        ...this.point,
+        modifiers: [],
+      }))
+      input.addEventListener('wheel', (event) => {
+        event.preventDefault()
+        const step = event.deltaMode === 1 ? 16 : event.deltaMode === 2 ? canvas.clientHeight : 1
+        send({
+          type: 'mouseWheel',
+          ...where(event),
+          deltaX: Math.round(event.deltaX * step),
+          deltaY: Math.round(event.deltaY * step),
+          modifiers: modifiers(event),
+        })
+      }, { passive: false })
+      input.addEventListener('contextmenu', event => event.preventDefault())
+      input.addEventListener('blur', () => send({ type: 'blur' }))
+      input.addEventListener('keydown', (event) => {
+        if (event.isComposing || this.composing)
+          return
+        event.preventDefault()
+        send({ type: 'keyDown', keyCode: event.keyCode, modifiers: modifiers(event) })
+      })
+      input.addEventListener('keypress', (event) => {
+        if (event.isComposing || this.composing || !event.key)
+          return
+        event.preventDefault()
+        send({
+          type: 'char',
+          keyCode: event.keyCode,
+          character: event.key,
+          modifiers: modifiers(event),
+        })
+      })
+      input.addEventListener('keyup', (event) => {
+        if (event.isComposing || this.composing)
+          return
+        event.preventDefault()
+        send({ type: 'keyUp', keyCode: event.keyCode, modifiers: modifiers(event) })
+      })
+      input.addEventListener('compositionstart', () => {
+        this.composing = true
+      })
+      input.addEventListener('compositionupdate', (event) => {
+        const text = event.data || ''
+        send({
+          type: 'imeSetComposition',
+          text,
+          selectionStart: text.length,
+          selectionEnd: text.length,
+        })
+      })
+      input.addEventListener('compositionend', (event) => {
+        this.composing = false
+        send({ type: 'imeCommitText', text: event.data || '' })
+        input.value = ''
+      })
+    }
+
+    render() {
+      if (this.destroyed || !this.surface)
+        return
+      this.animation = requestAnimationFrame(() => this.render())
+      if (!this.visible || !this.intersecting || document.hidden)
+        return
+      const now = performance.now()
+      if (this.painting || now - this.paintedAt < 16)
+        return
+      this.paintedAt = now
+      this.painting = true
+      invoke('frame', { label: this.label, full: !this.painted }).then((buffer) => {
+        this.painting = false
+        this.paint(buffer)
+      }, () => {
+        this.painting = false
+      })
+    }
+
+    paint(buffer) {
+      if (!this.context || !buffer)
+        return
+      const bytes = buffer instanceof ArrayBuffer ? buffer : buffer.buffer
+      if (!(bytes instanceof ArrayBuffer) || bytes.byteLength < 24)
+        return
+      const header = new Uint32Array(bytes, 0, 6)
+      const cursor = header[5]
+      if (this.cursor !== cursor) {
+        this.cursor = cursor
+        this.input.style.cursor = CURSORS[cursor] || 'default'
+      }
+      const width = header[1]
+      const height = header[2]
+      const count = header[4]
+      if (!width || !height || !count)
+        return
+      const canvas = this.surface
+      if (canvas.width !== width)
+        canvas.width = width
+      if (canvas.height !== height)
+        canvas.height = height
+      const rects = new Uint32Array(bytes, 24, count * 4)
+      let offset = 24 + count * 16
+      for (let index = 0; index < count; index++) {
+        const x = rects[index * 4]
+        const y = rects[index * 4 + 1]
+        const w = rects[index * 4 + 2]
+        const h = rects[index * 4 + 3]
+        const image = new ImageData(new Uint8ClampedArray(bytes, offset, w * h * 4), w, h)
+        offset += w * h * 4
+        this.context.putImageData(image, x, y)
+      }
+      this.painted = true
     }
 
     measure() {
