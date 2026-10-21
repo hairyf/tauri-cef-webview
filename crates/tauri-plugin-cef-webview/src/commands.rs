@@ -164,7 +164,7 @@ fn forward_guest_events<R: Runtime>(
 
 /// Creates (or re-attaches) a child webview inside the caller's window.
 #[tauri::command]
-pub fn create<R: Runtime>(
+pub async fn create<R: Runtime>(
     caller: Webview<R>,
     registry: State<'_, Registry<R>>,
     label: String,
@@ -315,78 +315,98 @@ pub fn create<R: Runtime>(
 
     let load_state = state.clone();
     let load_label = label.clone();
-    builder = builder.on_page_load(move |webview, payload| match payload.event() {
-        PageLoadEvent::Started => {
-            let url = payload.url().to_string();
-            load_state.update(|state| {
-                state.loading = true;
-                state.waiting_for_response = true;
-                state.url = url.clone();
-            });
-            emit_event(
-                &webview,
-                &load_label,
-                "load-commit",
-                json!({
-                    "url": url,
-                    "isMainFrame": true,
-                }),
-            );
-            emit_event(&webview, &load_label, "did-start-loading", json!({}));
-            emit_event(
-                &webview,
-                &load_label,
-                "did-start-navigation",
-                json!({
-                    "url": url,
-                    "isInPlace": false,
-                    "isMainFrame": true,
-                    "frameProcessId": 0,
-                    "frameRoutingId": 0,
-                }),
-            );
-            emit_event(&webview, &load_label, "state", snapshot(&load_state));
+    builder = builder.on_page_load(move |webview, payload| {
+        // Bridge navigations are cancelled in `on_navigation`, but CEF still
+        // reports a page load for them; they must not reach the page state. The
+        // runtime also finishes its own placeholder document before the real URL.
+        let href = payload.url().as_str();
+        if href.starts_with("cef-webview:") || href.contains("data-tauri-cef-internal") {
+            return;
         }
-        PageLoadEvent::Finished => {
-            let url = payload.url().to_string();
-            let can_go_back = webview.can_go_back().unwrap_or(false);
-            let can_go_forward = webview.can_go_forward().unwrap_or(false);
-            load_state.update(|state| {
-                if state.last_finished_url != url {
-                    state.history_index += 1;
-                    state.last_finished_url = url.clone();
-                }
-                state.loading = false;
-                state.waiting_for_response = false;
-                state.url = url.clone();
-                state.can_go_back = can_go_back;
-                state.can_go_forward = can_go_forward;
-            });
-            emit_event(
-                &webview,
-                &load_label,
-                "did-frame-finish-load",
-                json!({ "isMainFrame": true }),
-            );
-            emit_event(&webview, &load_label, "did-finish-load", json!({}));
-            emit_event(&webview, &load_label, "did-stop-loading", json!({}));
-            emit_event(
-                &webview,
-                &load_label,
-                "did-frame-navigate",
-                json!({
-                    "url": url,
-                    "httpResponseCode": 0,
-                    "httpStatusText": "",
-                    "isMainFrame": true,
-                    "frameProcessId": 0,
-                    "frameRoutingId": 0,
-                }),
-            );
-            emit_event(&webview, &load_label, "did-navigate", json!({ "url": url }));
-            emit_event(&webview, &load_label, "state", snapshot(&load_state));
+        match payload.event() {
+            PageLoadEvent::Started => {
+                let url = payload.url().to_string();
+                load_state.update(|state| {
+                    state.loading = true;
+                    state.waiting_for_response = true;
+                    state.url = url.clone();
+                });
+                emit_event(
+                    &webview,
+                    &load_label,
+                    "load-commit",
+                    json!({
+                        "url": url,
+                        "isMainFrame": true,
+                    }),
+                );
+                emit_event(&webview, &load_label, "did-start-loading", json!({}));
+                emit_event(
+                    &webview,
+                    &load_label,
+                    "did-start-navigation",
+                    json!({
+                        "url": url,
+                        "isInPlace": false,
+                        "isMainFrame": true,
+                        "frameProcessId": 0,
+                        "frameRoutingId": 0,
+                    }),
+                );
+                emit_event(&webview, &load_label, "state", snapshot(&load_state));
+            }
+            PageLoadEvent::Finished => {
+                let url = payload.url().to_string();
+                load_state.update(|state| {
+                    if state.last_finished_url != url {
+                        state.history_index += 1;
+                        state.last_finished_url = url.clone();
+                    }
+                    state.loading = false;
+                    state.waiting_for_response = false;
+                    state.url = url.clone();
+                });
+                emit_event(
+                    &webview,
+                    &load_label,
+                    "did-frame-finish-load",
+                    json!({ "isMainFrame": true }),
+                );
+                emit_event(&webview, &load_label, "did-finish-load", json!({}));
+                emit_event(&webview, &load_label, "did-stop-loading", json!({}));
+                emit_event(
+                    &webview,
+                    &load_label,
+                    "did-frame-navigate",
+                    json!({
+                        "url": url,
+                        "httpResponseCode": 0,
+                        "httpStatusText": "",
+                        "isMainFrame": true,
+                        "frameProcessId": 0,
+                        "frameRoutingId": 0,
+                    }),
+                );
+                emit_event(&webview, &load_label, "did-navigate", json!({ "url": url }));
+                emit_event(&webview, &load_label, "state", snapshot(&load_state));
+
+                // `can_go_back`/`can_go_forward` are synchronous round-trips to the
+                // runtime, and this handler runs on the CEF UI thread, so calling them
+                // here deadlocks the whole app. Ask from a worker thread instead.
+                let refresh = webview.clone();
+                let refresh_state = load_state.clone();
+                let refresh_label = load_label.clone();
+                tauri::async_runtime::spawn(async move {
+                    let can_go_back = refresh.can_go_back().unwrap_or(false);
+                    let can_go_forward = refresh.can_go_forward().unwrap_or(false);
+                    refresh_state.update(|state| {
+                        state.can_go_back = can_go_back;
+                        state.can_go_forward = can_go_forward;
+                    });
+                    emit_event(&refresh, &refresh_label, "state", snapshot(&refresh_state));
+                });
+            }
         }
-        _ => {}
     });
 
     registry.mark_child(&label);
@@ -409,7 +429,7 @@ pub fn create<R: Runtime>(
 
 /// Moves and resizes a child webview. Values are logical pixels.
 #[tauri::command]
-pub fn set_rect<R: Runtime>(
+pub async fn set_rect<R: Runtime>(
     _caller: Webview<R>,
     registry: State<'_, Registry<R>>,
     label: String,
@@ -425,7 +445,7 @@ pub fn set_rect<R: Runtime>(
 
 /// Shows or hides a child webview.
 #[tauri::command]
-pub fn set_visible<R: Runtime>(
+pub async fn set_visible<R: Runtime>(
     _caller: Webview<R>,
     registry: State<'_, Registry<R>>,
     label: String,
@@ -438,7 +458,7 @@ pub fn set_visible<R: Runtime>(
 
 /// Closes and unregisters a child webview.
 #[tauri::command]
-pub fn destroy<R: Runtime>(
+pub async fn destroy<R: Runtime>(
     _caller: Webview<R>,
     registry: State<'_, Registry<R>>,
     label: String,
@@ -452,7 +472,7 @@ pub fn destroy<R: Runtime>(
 
 /// Evaluates JavaScript in a child webview.
 #[tauri::command]
-pub fn eval<R: Runtime>(
+pub async fn eval<R: Runtime>(
     _caller: Webview<R>,
     registry: State<'_, Registry<R>>,
     label: String,
@@ -463,7 +483,7 @@ pub fn eval<R: Runtime>(
 
 /// Injects a stylesheet into a child webview and returns its key.
 #[tauri::command]
-pub fn insert_css<R: Runtime>(
+pub async fn insert_css<R: Runtime>(
     _caller: Webview<R>,
     registry: State<'_, Registry<R>>,
     label: String,
@@ -474,7 +494,7 @@ pub fn insert_css<R: Runtime>(
 
 /// Removes a stylesheet previously inserted with [`insert_css`].
 #[tauri::command]
-pub fn remove_inserted_css<R: Runtime>(
+pub async fn remove_inserted_css<R: Runtime>(
     _caller: Webview<R>,
     registry: State<'_, Registry<R>>,
     label: String,
@@ -487,7 +507,7 @@ pub fn remove_inserted_css<R: Runtime>(
 
 /// Navigates a child webview to `url`.
 #[tauri::command]
-pub fn navigate<R: Runtime>(
+pub async fn navigate<R: Runtime>(
     _caller: Webview<R>,
     registry: State<'_, Registry<R>>,
     label: String,
@@ -498,7 +518,7 @@ pub fn navigate<R: Runtime>(
 
 /// Reloads a child webview.
 #[tauri::command]
-pub fn reload<R: Runtime>(
+pub async fn reload<R: Runtime>(
     _caller: Webview<R>,
     registry: State<'_, Registry<R>>,
     label: String,
@@ -508,7 +528,7 @@ pub fn reload<R: Runtime>(
 
 /// Opens the devtools of a child webview.
 #[tauri::command]
-pub fn open_devtools<R: Runtime>(
+pub async fn open_devtools<R: Runtime>(
     _caller: Webview<R>,
     registry: State<'_, Registry<R>>,
     label: String,
