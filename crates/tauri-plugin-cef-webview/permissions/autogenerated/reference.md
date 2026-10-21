@@ -14,6 +14,7 @@ Default permissions for the cef-webview plugin. Allows the frontend to create an
 - `allow-navigate`
 - `allow-reload`
 - `allow-open-devtools`
+- `allow-call`
 
 ## Permission Table
 
@@ -23,6 +24,32 @@ Default permissions for the cef-webview plugin. Allows the frontend to create an
 <th>Description</th>
 </tr>
 
+
+<tr>
+<td>
+
+`cef-webview:allow-call`
+
+</td>
+<td>
+
+Enables the call command without any pre-configured scope.
+
+</td>
+</tr>
+
+<tr>
+<td>
+
+`cef-webview:deny-call`
+
+</td>
+<td>
+
+Denies the call command without any pre-configured scope.
+
+</td>
+</tr>
 
 <tr>
 <td>

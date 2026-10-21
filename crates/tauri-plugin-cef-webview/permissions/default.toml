@@ -11,4 +11,5 @@ permissions = [
   "allow-navigate",
   "allow-reload",
   "allow-open-devtools",
+  "allow-call",
 ]

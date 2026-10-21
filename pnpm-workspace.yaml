@@ -19,9 +19,6 @@ allowBuilds:
   esbuild: true
   simple-git-hooks: true
 
-catalog:
-  '@tauri-apps/api': 3.0.0-alpha.3
-
 catalogs:
   cli:
     '@antfu/eslint-config': ^9.5.1

@@ -1,6 +1,7 @@
-import { installWebviews } from './element'
+export type * from './types'
 
-export type { WebviewElement, WebviewRect } from './element'
-export { installWebviews } from './element'
-
-installWebviews()
+declare global {
+  interface HTMLElementTagNameMap {
+    webview: import('./types').WebviewElement
+  }
+}

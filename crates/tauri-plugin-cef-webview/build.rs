@@ -9,6 +9,7 @@ const COMMANDS: &[&str] = &[
     "navigate",
     "reload",
     "open_devtools",
+    "call",
 ];
 
 fn main() {
