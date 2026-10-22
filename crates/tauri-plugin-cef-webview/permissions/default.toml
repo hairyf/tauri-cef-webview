@@ -13,4 +13,5 @@ permissions = [
   "allow-open-devtools",
   "allow-call",
   "allow-frame",
+  "allow-set-overlay-clip",
 ]

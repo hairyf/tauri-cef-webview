@@ -247,6 +247,9 @@
       }).then((state) => {
         this.applyState(state)
         this.mountSurface()
+        // The native webview only becomes clippable now; force the next
+        // overlay tick to re-send instead of trusting the earlier empty one.
+        overlaySignature = null
       })
       this.queue.catch((error) => {
         console.error(`[cef-webview] failed to create webview "${label}"`, error)
@@ -881,9 +884,87 @@
       destroy(element)
   }
 
+  // Overlay clipping: elements tagged with `data-cef-overlay` are carved out of
+  // the native child webviews, so they can cover and receive clicks over them.
+  // ponytail: polls the DOM every frame while a webview exists; switch to a
+  // MutationObserver + ResizeObserver sweep if this shows up in profiles.
+  const OVERLAY_ATTRIBUTE = 'data-cef-overlay'
+  // null (not '') so the first tick always syncs: a region left over by the
+  // previous page load must be cleared even when the new page has no overlay.
+  let overlaySignature = null
+  let overlayBusy = false
+
+  function overlayRects() {
+    const rects = []
+    for (const element of document.querySelectorAll(`[${OVERLAY_ATTRIBUTE}]`)) {
+      const rect = element.getBoundingClientRect()
+      if (rect.width < 1 || rect.height < 1)
+        continue
+      const style = getComputedStyle(element)
+      if (style.display === 'none' || style.visibility === 'hidden' || style.opacity === '0')
+        continue
+      // CSS px: the plugin derives the CSS → device scale from each webview
+      // element box versus its native window, so no `devicePixelRatio` here.
+      rects.push([rect.left, rect.top, rect.right, rect.bottom])
+    }
+    return rects
+  }
+
+  // Page scrollbars are painted by the host page, not by an element, so a
+  // native webview that reaches the viewport edge covers them. Carve the strip
+  // they occupy so the scrollbar stays visible and clickable.
+  function scrollbarRects() {
+    const root = document.documentElement
+    const width = window.innerWidth - root.clientWidth
+    const height = window.innerHeight - root.clientHeight
+    const rects = []
+    if (width > 0)
+      rects.push([root.clientWidth, 0, root.clientWidth + width, window.innerHeight])
+    if (height > 0)
+      rects.push([0, root.clientHeight, window.innerWidth, root.clientHeight + height])
+    return rects
+  }
+
+  function overlayViews() {
+    const views = []
+    for (const controller of controllers) {
+      if (controller.destroyed || !controller.element.isConnected)
+        continue
+      const box = controller.measure()
+      if (box.width < 1 || box.height < 1)
+        continue
+      views.push([controller.label, [box.x, box.y, box.width, box.height]])
+    }
+    return views
+  }
+
+  function syncOverlayClip() {
+    if (overlayBusy)
+      return
+    const rects = overlayRects().concat(scrollbarRects())
+    const views = overlayViews()
+    const signature = JSON.stringify([views, rects])
+    if (signature === overlaySignature)
+      return
+    overlaySignature = signature
+    overlayBusy = true
+    invoke('set_overlay_clip', { views, rects })
+      .catch(noop)
+      .finally(() => {
+        overlayBusy = false
+      })
+  }
+
+  function overlayTick() {
+    requestAnimationFrame(overlayTick)
+    if (controllers.size > 0)
+      syncOverlayClip()
+  }
+
   function start() {
     subscribe()
     scan(document)
+    overlayTick()
 
     const observer = new MutationObserver((records) => {
       for (const record of records) {

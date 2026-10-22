@@ -5,6 +5,7 @@ mod commands;
 mod frames;
 #[cfg(feature = "offscreen")]
 mod offscreen;
+mod overlay;
 mod registry;
 mod scripts;
 
@@ -76,6 +77,7 @@ pub fn init_with<R: Runtime>(config: Config) -> TauriPlugin<R> {
             commands::open_devtools,
             commands::call,
             commands::frame,
+            overlay::set_overlay_clip,
         ])
         .setup(move |app, _api| {
             app.manage(Registry::<R>::new(config));

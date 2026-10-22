@@ -318,10 +318,42 @@ pages animate less smoothly than native child webviews, and browser popups
 (`<select>`, context menus) are not drawn into the frame yet. Leave the setting
 off for pages that need native-quality scrolling.
 
+## Overlay clipping
+
+Windows only, behind the `layering` feature. Elements that must sit above a
+windowed child webview opt in with `data-cef-overlay`. The plugin subtracts their
+rectangles from the native window region of every child webview
+(`SetWindowRgn`), so the host page below shows through and receives clicks in
+those rectangles.
+
+```toml
+# Cargo.toml
+tauri-plugin-cef-webview = { version = "0.4", features = [ "layering" ] }
+```
+
+```html
+<div id="webview-host">
+  <webview src="https://example.com/"></webview>
+  <div class="modal" data-cef-overlay>...</div>
+</div>
+```
+
+The element measures `[data-cef-overlay]` once per animation frame and sends the
+rectangles together with each webview element box. The plugin derives the CSS to
+native pixel scale from the webview window itself, so HiDPI scaling does not
+shift the holes. Page scrollbars are carved the same way when a webview reaches
+the viewport edge, so the scrollbar stays visible and draggable over it.
+
+Trade-offs: rectangles only (rounded corners and shadows leave stray pixels),
+the hole trails the DOM by a frame, translucent overlays show the page behind the
+webview rather than webview pixels (use the `offscreen` feature when the overlay
+must blend with the webview), and CEF popups (`<select>`, context menus) are
+separate native windows that are not clipped.
+
 ## How it works
 
 * The plugin registers `element.js` as a Tauri initialization script, so it runs at document start before any page script, including in windows created from `tauri.conf.json`.
-* The element talks to the plugin through Tauri IPC (`plugin:cef-webview|*` commands): `create`, `set_rect`, `set_visible`, `destroy`, `call` and the per-operation commands.
+* The element talks to the plugin through Tauri IPC (`plugin:cef-webview|*` commands): `create`, `set_rect`, `set_visible`, `destroy`, `set_overlay_clip`, `call` and the per-operation commands.
 * The plugin injects `guest.js` into every child webview. It reports events the CEF runtime does not surface, applies zoom, mute and editing, and provides the `ipcRenderer` shim.
 * Guest events are batched into a `cef-webview://event/` custom-scheme navigation every 16ms. The plugin cancels that navigation in `on_navigation` and forwards the batch to the application page. The bridge is main-frame only.
 * `js`/`css` from `Config` and from element attributes are registered as CEF initialization scripts, so they apply on every navigation without flashing.
@@ -329,9 +361,9 @@ off for pages that need native-quality scrolling.
 
 ## Limitations
 
-* The native webview is drawn above the page. CSS `transform`, `opacity`, `border-radius`, `overflow: hidden` clipping and `z-index` stacking do not affect it. An element that must be covered cannot be placed over the webview. Enable the `offscreen` feature to render into the page instead.
+* The native webview is drawn above the page. CSS `transform`, `opacity`, `border-radius`, `overflow: hidden` clipping and `z-index` stacking do not affect it. An element that must be covered cannot be placed over the webview. Enable the `offscreen` feature to render into the page instead, or `layering` to carve overlay rectangles out of the native window.
 * Position is synced on a best-effort basis; scrolling may show a few frames of lag.
-* The `<webview>` tag name has no hyphen, so it cannot be registered with `customElements.define`. The plugin enhances the element in place: the DOM node stays `<webview>` and is not an instance of a custom element class.
+* The `<webview>` tag name has no hyphen, so it cannot be registered with `customElements.define`. The plugin enhances the element in place: the DOM node stays `<webview>` and is not an instance of a custom element class. It is also not a void element, so `<webview src="..."/>` does not self-close: the following markup is parsed as its children. Always close it with `</webview>` and put overlays next to the element.
 * Only the CEF runtime (`tauri-runtime-cef`) is supported.
 * Sandboxing, `partition`, Node.js integration and Blink/Chromium preferences are process-wide in CEF and cannot be configured per element.
 * `did-fail-load` and crash reporting are unavailable: the runtime does not deliver load errors or renderer termination.

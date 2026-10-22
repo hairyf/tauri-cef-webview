@@ -16,6 +16,7 @@ Default permissions for the cef-webview plugin. Allows the frontend to create an
 - `allow-open-devtools`
 - `allow-call`
 - `allow-frame`
+- `allow-set-overlay-clip`
 
 ## Permission Table
 
@@ -282,6 +283,32 @@ Enables the remove_inserted_css command without any pre-configured scope.
 <td>
 
 Denies the remove_inserted_css command without any pre-configured scope.
+
+</td>
+</tr>
+
+<tr>
+<td>
+
+`cef-webview:allow-set-overlay-clip`
+
+</td>
+<td>
+
+Enables the set_overlay_clip command without any pre-configured scope.
+
+</td>
+</tr>
+
+<tr>
+<td>
+
+`cef-webview:deny-set-overlay-clip`
+
+</td>
+<td>
+
+Denies the set_overlay_clip command without any pre-configured scope.
 
 </td>
 </tr>

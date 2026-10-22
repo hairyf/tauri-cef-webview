@@ -11,6 +11,7 @@ const COMMANDS: &[&str] = &[
     "open_devtools",
     "call",
     "frame",
+    "set_overlay_clip",
 ];
 
 fn main() {
