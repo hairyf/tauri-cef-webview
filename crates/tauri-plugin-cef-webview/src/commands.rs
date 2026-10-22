@@ -448,11 +448,13 @@ pub async fn create<R: Runtime>(
 
                 // `can_go_back`/`can_go_forward` are synchronous round-trips to the
                 // runtime, and this handler runs on the CEF UI thread, so calling them
-                // here deadlocks the whole app. Ask from a worker thread instead.
+                // here deadlocks the whole app. Ask from the blocking pool instead: the
+                // getters block until the event loop services the message, so they must
+                // not occupy a reactor worker that other commands need.
                 let refresh = webview.clone();
                 let refresh_state = load_state.clone();
                 let refresh_label = load_label.clone();
-                tauri::async_runtime::spawn(async move {
+                tauri::async_runtime::spawn_blocking(move || {
                     let can_go_back = refresh.can_go_back().unwrap_or(false);
                     let can_go_forward = refresh.can_go_forward().unwrap_or(false);
                     refresh_state.update(|state| {
